@@ -4,91 +4,109 @@
 <meta charset="UTF-8">
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { width:320px; padding:16px; font-family: system-ui, sans-serif; background:#1a1a2e; color:#e0e0e0; }
-  h2 { font-size:18px; margin-bottom:12px; color:#00d4ff; }
-  label { font-size:13px; color:#aaa; display:block; margin:10px 0 4px; }
-  input[type="text"] {
-    width:100%; padding:8px; border-radius:6px; border:1px solid #333;
-    background:#16213e; color:#fff; font-size:13px; outline:none;
+  body { width:320px; padding:14px; font-family: system-ui, sans-serif; background:#1a1a2e; color:#e0e0e0; }
+  h2 { font-size:17px; margin-bottom:6px; color:#00d4ff; }
+  .status-line { font-size:12px; color:#888; margin-bottom:12px; min-height:18px; }
+
+  .section-title { font-size:12px; color:#888; margin:12px 0 6px; text-transform:uppercase; letter-spacing:1px; }
+  label { font-size:11px; color:#aaa; display:block; margin:6px 0 2px; }
+  input[type="text"], input[type="password"], select {
+    width:100%; padding:7px; border-radius:5px; border:1px solid #333;
+    background:#16213e; color:#fff; font-size:12px; outline:none;
   }
-  input[type="text"]:focus { border-color:#00d4ff; }
-  button {
-    width:100%; padding:10px; margin-top:10px; border-radius:6px;
-    border:none; font-size:14px; font-weight:bold; cursor:pointer;
-    transition: background .2s;
-  }
-  .btn-analyze { background:#00d4ff; color:#000; }
-  .btn-analyze:hover { background:#00b8e0; }
-  .btn-analyze:disabled { background:#555; color:#999; cursor:not-allowed; }
+  input:focus, select:focus { border-color:#00d4ff; }
 
   .toggle-row {
     display:flex; justify-content:space-between; align-items:center;
     padding:8px 0; border-bottom:1px solid #2a2a4a;
   }
   .toggle-row span { font-size:13px; }
-  .switch {
-    position:relative; width:44px; height:24px;
-  }
+  .switch { position:relative; width:42px; height:22px; }
   .switch input { opacity:0; width:0; height:0; }
   .slider {
     position:absolute; cursor:pointer; top:0;left:0;right:0;bottom:0;
-    background:#444; border-radius:24px; transition:.3s;
+    background:#444; border-radius:22px; transition:.3s;
   }
   .slider:before {
-    content:""; position:absolute; height:18px; width:18px;
+    content:""; position:absolute; height:16px; width:16px;
     left:3px; bottom:3px; background:#fff; border-radius:50%; transition:.3s;
   }
   input:checked + .slider { background:#00d4ff; }
   input:checked + .slider:before { transform:translateX(20px); }
 
-  .status { margin-top:10px; font-size:12px; color:#888; min-height:18px; }
-  .links { margin-top:14px; padding-top:10px; border-top:1px solid #2a2a4a; }
-  .links a { display:block; font-size:12px; color:#00d4ff; text-decoration:none; margin:4px 0; }
+  button {
+    width:100%; padding:9px; margin-top:10px; border-radius:6px;
+    border:none; font-size:13px; font-weight:bold; cursor:pointer;
+  }
+  .btn-save { background:#00d4ff; color:#000; }
+  .btn-save:hover { background:#00b8e0; }
+
+  .links { margin-top:12px; padding-top:10px; border-top:1px solid #2a2a4a; }
+  .links a { display:block; font-size:12px; color:#00d4ff; text-decoration:none; margin:3px 0; }
   .links a:hover { text-decoration:underline; }
-  .links .title { color:#aaa; font-size:12px; margin-bottom:4px; }
+  .links .badge { font-size:10px; padding:1px 5px; border-radius:3px; margin-left:4px; }
+  .badge-free { background:#1a5c1a; color:#51cf66; }
+  .badge-pay { background:#5c3a1a; color:#ffd43b; }
 </style>
 </head>
 <body>
 
-<h2>📊 B站内容分析器</h2>
+<h2>📊 BilibiliUltra</h2>
+<div class="status-line" id="status">进入B站视频页自动分析</div>
 
-<label>BV号 / 视频链接</label>
-<div style="display:flex;gap:8px;">
-  <input type="text" id="bvInput" placeholder="BVxxxxxx 或粘贴链接" style="flex:1;">
-  <button class="btn-analyze" id="btnAnalyze" style="width:auto;margin-top:0;padding:8px 16px;">分析</button>
+<!-- API 设置 -->
+<div class="section-title">🔑 API 密钥</div>
+
+<label>ASR 语音识别 (Groq Whisper)</label>
+<div style="display:flex;gap:4px;">
+  <input type="password" id="groqKey" placeholder="gsk_xxx" style="flex:1;">
 </div>
-<div class="status" id="status"></div>
+<a href="https://console.groq.com/keys" target="_blank" style="font-size:10px;color:#00d4ff;">注册 Groq →</a>
 
-<div style="margin-top:14px;">
-  <div class="toggle-row">
-    <span>🔇 自动跳过广告</span>
-    <label class="switch">
-      <input type="checkbox" id="toggleAutoSkip" checked>
-      <span class="slider"></span>
-    </label>
-  </div>
-  <div class="toggle-row">
-    <span>🌡️ 信息密度热力图</span>
-    <label class="switch">
-      <input type="checkbox" id="toggleHeatmap" checked>
-      <span class="slider"></span>
-    </label>
-  </div>
-  <div class="toggle-row">
-    <span>💬 显示片段摘要</span>
-    <label class="switch">
-      <input type="checkbox" id="toggleTooltip">
-      <span class="slider"></span>
-    </label>
-  </div>
+<label>LLM 接口 (OpenAI 兼容)</label>
+<select id="llmProvider" style="margin-top:2px;">
+  <option value="openai">OpenAI 兼容接口</option>
+  <option value="anthropic">Anthropic Claude</option>
+</select>
+<input type="password" id="llmKey" placeholder="sk-xxx" style="margin-top:4px;">
+<input type="text" id="llmBaseUrl" placeholder="https://api.deepseek.com" style="margin-top:3px;">
+<label style="margin-top:3px;">模型名称</label>
+<input type="text" id="llmModel" placeholder="deepseek-chat" style="margin-top:2px;">
+<div style="font-size:10px;color:#666;margin-top:3px;">
+  预设: DeepSeek | 智谱 | Ollama | 硅基流动 | Claude
+</div>
+
+<a href="https://platform.deepseek.com/api_keys" target="_blank" style="font-size:10px;color:#00d4ff;">注册 DeepSeek →</a>
+
+<button class="btn-save" id="btnSave">💾 保存设置</button>
+<div style="font-size:11px;color:#51cf66;margin-top:4px;display:none;" id="savedMsg">✅ 已保存</div>
+
+<!-- 功能开关 -->
+<div class="section-title">⚙️ 功能开关</div>
+<div class="toggle-row">
+  <span>🔇 自动跳过广告</span>
+  <label class="switch">
+    <input type="checkbox" id="toggleAutoSkip" checked>
+    <span class="slider"></span>
+  </label>
+</div>
+<div class="toggle-row">
+  <span>🌡️ 信息密度热力图</span>
+  <label class="switch">
+    <input type="checkbox" id="toggleHeatmap" checked>
+    <span class="slider"></span>
+  </label>
+</div>
+<div class="toggle-row">
+  <span>💬 悬停显示摘要</span>
+  <label class="switch">
+    <input type="checkbox" id="toggleTooltip">
+    <span class="slider"></span>
+  </label>
 </div>
 
 <div class="links">
-  <div class="title">🔑 需要注册的 API (免费额度):</div>
-  <a href="https://console.groq.com/keys" target="_blank">Groq Whisper (ASR 语音转文字) →</a>
-  <a href="https://platform.deepseek.com/api_keys" target="_blank">DeepSeek (内容分析 LLM) →</a>
-  <a href="https://console.anthropic.com/" target="_blank">Anthropic Claude (备选 LLM) →</a>
-  <a href="https://aistudio.google.com/apikey" target="_blank">Google Gemini (备选 LLM) →</a>
+  <a href="https://github.com/Xo776/BilibiliUltra" target="_blank">📖 GitHub 项目</a>
 </div>
 
 <script src="popup.js"></script>

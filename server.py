@@ -39,6 +39,24 @@ class AnalysisHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "需要 bvid 参数"}, 400)
             return
 
+        # 从请求头读取 API 配置 (扩展传入)
+        groq_key = self.headers.get("X-Groq-Key", "")
+        llm_provider = self.headers.get("X-LLM-Provider", "openai")
+        llm_key = self.headers.get("X-LLM-Key", "")
+        llm_base_url = self.headers.get("X-LLM-Base-Url", "")
+        llm_model = self.headers.get("X-LLM-Model", "")
+
+        # 设置为环境变量 (本次请求有效)
+        if groq_key:
+            os.environ["GROQ_API_KEY"] = groq_key
+        if llm_key:
+            os.environ["LLM_PROVIDER"] = llm_provider
+            os.environ["OPENAI_API_KEY"] = llm_key
+            if llm_base_url:
+                os.environ["OPENAI_BASE_URL"] = llm_base_url
+            if llm_model:
+                os.environ["OPENAI_MODEL"] = llm_model
+
         try:
             bvid = parse_bv(bvid)
             info = get_video_info(bvid)

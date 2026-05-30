@@ -31,6 +31,7 @@ const STATE = {
 function init() {
   loadSettings();
   extractBvid();
+  autoAnalyze();   // ← 进页面自动分析, 不需要手动输入 BV
   waitForPlayer();
   listenPopup();
   observeUrlChange();
@@ -202,6 +203,17 @@ function showSkipToast(ad) {
   }, 2500);
 }
 
+// === 自动分析 (进页面即触发) ===
+async function autoAnalyze() {
+  if (!STATE.bvid) return;
+  console.log('[密度分析器] 自动分析:', STATE.bvid);
+  const result = await runAnalysis(STATE.bvid);
+  if (!result.ok) {
+    console.log('[密度分析器] 后端未启动, 显示演示数据');
+    applyAnalysis(demoData());
+  }
+}
+
 // ============================================================
 // 通信: 接收 popup 指令
 // ============================================================
@@ -237,6 +249,18 @@ function listenPopup() {
 async function runAnalysis(bvid) {
   console.log('[密度分析器] 开始分析:', bvid);
 
+  // 先从 storage 读取 API 配置
+  const apiConfig = await new Promise(resolve => {
+    chrome.storage.local.get([
+      'groqKey', 'llmProvider', 'llmKey', 'llmBaseUrl', 'llmModel',
+    ], resolve);
+  });
+
+  if (!apiConfig.groqKey && !apiConfig.llmKey) {
+    console.log('[密度分析器] 未配置 API Key, 显示演示数据');
+    return { ok: false, error: '请先在插件弹窗中设置 API Key' };
+  }
+
   // 先查本地缓存
   const cached = await getCachedAnalysis(bvid);
   if (cached) {
@@ -245,10 +269,17 @@ async function runAnalysis(bvid) {
     return { ok: true, segments: cached.segments?.length, cached: true };
   }
 
-  // 调 Python 后端 (需要本地运行 python server)
+  // 调 Python 后端, 携带 API 配置
   try {
     const resp = await fetch(`http://localhost:8765/analyze?bvid=${bvid}`, {
-      signal: AbortSignal.timeout(120000),
+      signal: AbortSignal.timeout(300000),
+      headers: {
+        'X-Groq-Key': apiConfig.groqKey || '',
+        'X-LLM-Provider': apiConfig.llmProvider || 'openai',
+        'X-LLM-Key': apiConfig.llmKey || '',
+        'X-LLM-Base-Url': apiConfig.llmBaseUrl || '',
+        'X-LLM-Model': apiConfig.llmModel || '',
+      },
     });
     if (resp.ok) {
       const data = await resp.json();
@@ -256,12 +287,13 @@ async function runAnalysis(bvid) {
       applyAnalysis(data);
       return { ok: true, segments: data.segments?.length };
     }
+    const err = await resp.text();
+    console.log('[密度分析器] 后端错误:', err);
+    return { ok: false, error: err };
   } catch (e) {
-    console.log('[密度分析器] 后端不可用, 尝试本地分析...');
+    console.log('[密度分析器] 后端不可用, 显示演示数据');
+    return { ok: false, error: '需要先启动 Python 后端: python server.py' };
   }
-
-  // 回退: 在当前页面采集数据并分析
-  return { ok: false, error: '需要先运行 Python 后端: python server.py' };
 }
 
 // === 应用分析结果 ===
