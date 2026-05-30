@@ -29,7 +29,7 @@ from config import (
     ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, ANTHROPIC_MODEL, ANTHROPIC_VERSION,
     GEMINI_KEY,
     GROQ_API_KEY, GROQ_WHISPER_MODEL,
-    SEGMENT_DURATION, DENSITY_PROMPT, OUTPUT_DIR,
+    SEGMENT_DURATION, DENSITY_PROMPT, DENSITY_SINGLE_PROMPT, OUTPUT_DIR,
 )
 
 # B站免费信号模块
@@ -115,11 +115,10 @@ def _ask_openai_compatible(prompt: str) -> dict:
         json={
             "model": OPENAI_MODEL,
             "messages": [
-                {"role": "system", "content": DENSITY_PROMPT},
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.1,
-            "max_tokens": 200,
+            "max_tokens": 4000,
         },
         timeout=30,
     )
@@ -151,7 +150,7 @@ def _ask_claude(prompt: str) -> dict:
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.1,
-            "max_tokens": 200,
+            "max_tokens": 4000,
         },
         timeout=30,
     )
@@ -169,7 +168,7 @@ def _ask_gemini(prompt: str) -> dict:
         json={
             "system_instruction": {"parts": [{"text": DENSITY_PROMPT}]},
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 200},
+            "generationConfig": {"temperature": 0.1, "maxOutputTokens": 4000},
         },
         timeout=30,
     )
@@ -265,85 +264,102 @@ def _skip_ad_indicator(text: str) -> bool:
     return False
 
 
-def analyze(segments: list, total_duration: int, bili_signals: Optional[BiliSignals] = None) -> list:
-    """
-    对每个时间块进行评分 (关键词预筛 → B站信号 → LLM)
-    
-    Args:
-        segments: _merge_segments 的输出
-        total_duration: 视频总时长(秒)
-        bili_signals: B站原生信号 (可选)
-    
-    Returns:
-        [{start, end, density, ad_probability, summary, is_ad, source}, ...]
-    """
-    results = []
-    total = len(segments)
-    skipped_llm = 0
-
-    for i, seg in enumerate(segments):
-        text = seg["text"].strip()
-        start = seg["start"]
-        end = min(seg["end"], total_duration)
-
-        # 空片段 → 默认低密度
+def _build_transcript(segments: list) -> str:
+    """将 segments 构建为带时间戳的文本, 供 LLM 一次性分析"""
+    lines = []
+    for seg in segments:
+        t = seg.get("start", 0)
+        text = seg.get("text", "").strip()
         if not text:
-            results.append({
-                "start": start, "end": end,
-                "density": 1, "ad_probability": 0,
-                "summary": "静音/无内容", "is_ad": False,
-                "source": "silence",
-            })
-            print(f"  [{i+1}/{total}] {start}-{end}s: 静音 → 跳过")
             continue
+        m, s = int(t // 60), int(t % 60)
+        lines.append(f"[{m:02d}:{s:02d}] {text}")
+    return "\n".join(lines)
 
-        # 预筛选 1: B站原生信号 → 直接标记广告 (最高置信度)
-        if _is_in_ad_zone(start, end, bili_signals):
-            results.append({
-                "start": start, "end": end,
-                "density": 2, "ad_probability": 10,
-                "summary": "广告(B站原生信号)", "is_ad": True,
-                "source": "bili_signal",
-            })
-            print(f"  [{i+1}/{total}] {start}-{end}s: 广告(B站信号) → 跳过 LLM")
-            skipped_llm += 1
-            continue
 
-        # 预筛选 2: 关键词 → 直接标记广告
-        if _skip_ad_indicator(text):
-            results.append({
-                "start": start, "end": end,
-                "density": 3, "ad_probability": 8,
-                "summary": "广告(关键词匹配)", "is_ad": True,
-                "source": "keyword",
-            })
-            print(f"  [{i+1}/{total}] {start}-{end}s: 广告(关键词) → 跳过 LLM")
-            skipped_llm += 1
-            continue
+def _holistic_analyze(transcript: str, total_duration: int, bili_signals: Optional[BiliSignals] = None) -> dict:
+    """
+    一次性全文分析: LLM 通读完整字幕, 返回 ad_segments + density_map
+    
+    比逐段分析准确得多 — LLM 能看到上下文, 判断语气转变
+    """
+    prompt = DENSITY_PROMPT.format(transcript=transcript[:12000])  # 限制长度
+    print(f"[LLM] 发送全文分析 ({len(transcript)}字符)...")
 
-        # LLM 评分 (信息密度 + 广告二次确认)
-        print(f"  [{i+1}/{total}] {start}-{end}s: 分析中... [{LLM_PROVIDER}]")
-        try:
-            llm_result = _ask_llm(text[:2000])
-        except Exception as e:
-            print(f"    LLM 调用失败: {e}")
-            llm_result = {"density": 5, "ad_probability": 1, "summary": "LLM错误"}
+    try:
+        raw = _ask_llm(prompt)
+    except Exception as e:
+        print(f"[LLM] 全文分析失败: {e}")
+        return {"ad_segments": [], "density_map": []}
 
-        results.append({
+    ad_segs = raw.get("ad_segments", [])
+    density_map = raw.get("density_map", [])
+
+    # 合并 B站免费信号检测到的广告
+    if bili_signals:
+        bili_ad = get_best_ad_segment(bili_signals)
+        if bili_ad:
+            # 检查是否已经被 LLM 覆盖, 没有则追加
+            already_covered = any(
+                abs(a.get("start", 0) - bili_ad["start"]) < 10
+                for a in ad_segs
+            )
+            if not already_covered:
+                ad_segs.append({
+                    "start": bili_ad["start"],
+                    "end": bili_ad["end"],
+                    "reason": f"B站信号: {bili_ad.get('source', 'unknown')}",
+                })
+
+    print(f"[LLM] 广告段: {len(ad_segs)}个, 密度区间: {len(density_map)}个")
+    for ad in ad_segs:
+        print(f"  ⚠ {ad['start']}s → {ad['end']}s: {ad.get('reason', '')}")
+
+    return {"ad_segments": ad_segs, "density_map": density_map}
+
+
+def _result_to_segments(result: dict, total_duration: int) -> list:
+    """将 LLM 返回的 ad_segments + density_map 转为统一的 segments 格式"""
+    ad_ranges = result.get("ad_segments", [])
+    density_map = result.get("density_map", [])
+
+    segments = []
+    seg_dur = SEGMENT_DURATION
+
+    # 先按30s生成所有区间
+    for start in range(0, total_duration, seg_dur):
+        end = min(start + seg_dur, total_duration)
+
+        # 检查是否在广告段内
+        is_ad = any(
+            a["start"] <= (start + end) / 2 <= a["end"]
+            for a in ad_ranges
+        )
+
+        # 拿 LLM 的密度评分
+        density = 5  # 默认
+        summary = ""
+        for dm in density_map:
+            if dm.get("start", 0) <= start < dm.get("end", 0):
+                density = dm.get("density", 5)
+                summary = dm.get("summary", "")
+                break
+
+        if is_ad:
+            density = min(density, 3)
+
+        segments.append({
             "start": start,
             "end": end,
-            "density": llm_result.get("density", 5),
-            "ad_probability": llm_result.get("ad_probability", 1),
-            "summary": llm_result.get("summary", ""),
-            "is_ad": llm_result.get("ad_probability", 1) >= 7,
-            "source": "llm",
+            "duration": seg_dur,
+            "density": density,
+            "ad_probability": 10 if is_ad else 1,
+            "summary": summary,
+            "is_ad": is_ad,
+            "source": "llm_holistic",
         })
-        time.sleep(0.3)
 
-    if skipped_llm > 0:
-        print(f"  💰 省了 {skipped_llm} 次 LLM 调用 (免费信号命中)")
-
-    return results
+    return segments
 
 
 # ============================================================
@@ -436,11 +452,16 @@ def run(audio_path: str = None, video_info=None, bvid: str = None, cid: int = No
     total_duration = video_info.duration if video_info else (
         int(asr_result.get("duration", 300)) if asr_result else 300
     )
-    chunks = _merge_segments(raw_segments)
-    print(f"\n[分析] 共 {len(chunks)} 个片段, LLM: {LLM_PROVIDER}/{OPENAI_MODEL}")
 
-    # === LLM 分析 ===
-    analysis = analyze(chunks, total_duration, bili_signals)
+    # 构建完整字幕文本
+    transcript = _build_transcript(raw_segments)
+    print(f"\n[分析] 全文 {len(transcript)} 字符, LLM: {LLM_PROVIDER}/{OPENAI_MODEL}")
+
+    # === LLM 一次性全文分析 (广告检测 + 密度评分) ===
+    holistic = _holistic_analyze(transcript, total_duration, bili_signals)
+
+    # 转为统一格式
+    analysis = _result_to_segments(holistic, total_duration)
 
     # === 输出 ===
     output = build_output(video_info, asr_result or {}, analysis, bili_signals)
