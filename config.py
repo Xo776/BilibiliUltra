@@ -1,17 +1,12 @@
 """
 新项目 - 配置模块
 支持 OpenAI 兼容接口 + Anthropic + Gemini
-所有 base_url 可配，兼容 DeepSeek / Zhipu / Ollama / 硅基流动 等
+所有 API Key 通过环境变量或扩展请求头传入
 """
 import os
-import sys
-import json
 
-# --- 路径处理：引用父项目的 tools/LLM 模块 ---
+# --- 路径处理 ---
 _PARENT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, _PARENT)
-
-from config.config import load_api_key
 
 # ============================================================
 # LLM 后端选择 — 改这里切换供应商
@@ -22,7 +17,7 @@ LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "openai")
 # ============================================================
 # OpenAI 兼容接口 (支持 DeepSeek / Zhipu / Ollama / SiliconFlow 等)
 # ============================================================
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY") or load_api_key("deepseek")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.deepseek.com")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "deepseek-v4-flash")
 
@@ -43,12 +38,9 @@ ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-3-5-sonnet-202
 ANTHROPIC_VERSION = "2023-06-01"  # Anthropic API version header
 
 # ============================================================
-# Gemini (复用父项目)
+# Gemini
 # ============================================================
-GEMINI_KEY = load_api_key("gemini")
-
-# 兼容旧代码
-DEEPSEEK_KEY = load_api_key("deepseek")
+GEMINI_KEY = os.environ.get("GEMINI_KEY", "")
 
 # --- ASR 配置 ---
 # Groq Whisper (免费额度: 每天 ~2小时音频)

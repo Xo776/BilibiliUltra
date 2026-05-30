@@ -98,6 +98,8 @@ class AnalysisHandler(BaseHTTPRequestHandler):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers",
+                         "X-Groq-Key, X-LLM-Provider, X-LLM-Key, X-LLM-Base-Url, X-LLM-Model")
         self.end_headers()
 
     def log_message(self, format, *args):
