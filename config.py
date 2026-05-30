@@ -24,7 +24,7 @@ LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "openai")
 # ============================================================
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY") or load_api_key("deepseek")
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.deepseek.com")
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "deepseek-chat")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "deepseek-v4-flash")
 
 # 常用 base_url 速查:
 #   DeepSeek:    https://api.deepseek.com

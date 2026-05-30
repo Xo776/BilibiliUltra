@@ -24,7 +24,7 @@ chrome.storage.local.get([
   if (data.llmProvider) llmProviderEl.value = data.llmProvider;
   if (data.llmKey) llmKeyEl.value = data.llmKey;
   llmBaseUrlEl.value = data.llmBaseUrl || 'https://api.deepseek.com';
-  llmModelEl.value = data.llmModel || 'deepseek-chat';
+  llmModelEl.value = data.llmModel || 'deepseek-v4-flash';
 
   toggleAutoSkip.checked = data.autoSkip !== false;
   toggleHeatmap.checked = data.heatmap !== false;

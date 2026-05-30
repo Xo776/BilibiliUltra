@@ -57,11 +57,11 @@ function extractBvid() {
 function waitForPlayer() {
   const check = () => {
     const video = document.querySelector('video');
-    const progress = document.querySelector('.bui-progress-wrap');
-    if (video && progress) {
+    if (video) {
       STATE.video = video;
-      setupAutoSkip();
-      requestAnimationFrame(() => renderHeatmap());
+      console.log('[密度分析器] 播放器就绪');
+      // 不要在这里调 setupAutoSkip/ renderHeatmap
+      // 等分析数据加载完 applyAnalysis() 再调
       return;
     }
     setTimeout(check, 1000);
@@ -165,9 +165,13 @@ function renderHeatmap() {
 function setupAutoSkip() {
   if (!STATE.video) return;
 
-  STATE.video.addEventListener('timeupdate', () => {
-    if (!STATE.autoSkip || !STATE.analysis) return;
+  // 移除旧监听器, 避免重复累加
+  if (STATE._skipHandler) {
+    STATE.video.removeEventListener('timeupdate', STATE._skipHandler);
+  }
 
+  STATE._skipHandler = () => {
+    if (!STATE.autoSkip || !STATE.analysis) return;
     const t = STATE.video.currentTime;
     const adSegs = STATE.analysis.ad_segments || [];
 
@@ -177,13 +181,14 @@ function setupAutoSkip() {
         STATE.skippedAds.add(key);
         console.log(`[密度分析器] 自动跳过广告: ${fmtTime(ad.start)} → ${fmtTime(ad.end)}`);
         STATE.video.currentTime = ad.end + 0.1;
-
-        // 显示跳过提示
         showSkipToast(ad);
         break;
       }
     }
-  });
+  };
+
+  STATE.video.addEventListener('timeupdate', STATE._skipHandler);
+  console.log('[密度分析器] 自动跳过已就绪, 广告段:', (STATE.analysis.ad_segments || []).length);
 }
 
 // === 提示浮层 ===
@@ -207,9 +212,22 @@ function showSkipToast(ad) {
 async function autoAnalyze() {
   if (!STATE.bvid) return;
   console.log('[密度分析器] 自动分析:', STATE.bvid);
+
+  // 先检查是否有缓存的 API 配置
+  const apiConfig = await new Promise(resolve => {
+    chrome.storage.local.get(['groqKey', 'llmKey'], resolve);
+  });
+
+  if (!apiConfig.groqKey && !apiConfig.llmKey) {
+    // 没配置 API Key → 直接用演示数据展示效果
+    console.log('[密度分析器] 未配置API → 演示模式');
+    applyAnalysis(demoData());
+    return;
+  }
+
   const result = await runAnalysis(STATE.bvid);
   if (!result.ok) {
-    console.log('[密度分析器] 后端未启动, 显示演示数据');
+    console.log('[密度分析器] 后端不可用 → 演示模式');
     applyAnalysis(demoData());
   }
 }
