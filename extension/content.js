@@ -70,32 +70,39 @@ function waitForPlayer() {
 }
 
 // ============================================================
-// 热力图渲染 (Canvas on Progress Bar)
+// 热力图渲染 — 浮动叠加在播放器底部
 // ============================================================
 
 function renderHeatmap() {
   if (!STATE.heatmap || !STATE.analysis) return;
 
-  const progressWrap = document.querySelector('.bui-progress-wrap');
-  if (!progressWrap) { setTimeout(renderHeatmap, 500); return; }
+  // 找播放器容器 (B站新版 bpx 或旧版)
+  const player = document.querySelector('.bpx-player-container, #bilibili-player, .bpx-player-video-wrap');
+  if (!player) { setTimeout(renderHeatmap, 500); return; }
 
   // 移除旧 Canvas
   if (STATE.canvas) STATE.canvas.remove();
 
-  const rect = progressWrap.getBoundingClientRect();
-  const canvas = document.createElement('canvas');
-  canvas.style.cssText = `
-    position: absolute; top: -14px; left: 0;
-    width: 100%; height: 12px;
-    border-radius: 6px; z-index: 999;
-    pointer-events: auto; cursor: pointer;
-  `;
-  canvas.width = rect.width;
-  canvas.height = 12;
+  const playerRect = player.getBoundingClientRect();
+  if (playerRect.width < 100) { setTimeout(renderHeatmap, 1000); return; }
 
-  // 插入到进度条容器
-  progressWrap.style.position = 'relative';
-  progressWrap.insertBefore(canvas, progressWrap.firstChild);
+  const canvas = document.createElement('canvas');
+  canvas.id = 'biliultra-heatmap';
+  canvas.style.cssText = `
+    position: fixed;
+    left: ${playerRect.left}px;
+    bottom: ${window.innerHeight - playerRect.bottom + 42}px;
+    width: ${playerRect.width}px; height: 10px;
+    border-radius: 5px;
+    z-index: 9999;
+    pointer-events: auto;
+    cursor: pointer;
+    opacity: 0.9;
+  `;
+  canvas.width = playerRect.width;
+  canvas.height = 10;
+
+  document.body.appendChild(canvas);
   STATE.canvas = canvas;
 
   // 绘制
@@ -105,57 +112,100 @@ function renderHeatmap() {
   const dur = STATE.analysis.meta.duration || 60;
   const segs = STATE.analysis.segments || [];
 
+  ctx.clearRect(0, 0, w, h);
   for (const seg of segs) {
     const x = (seg.start / dur) * w;
-    const segW = Math.max(1, ((seg.end - seg.start) / dur) * w);
+    const segW = Math.max(1.5, ((seg.end - seg.start) / dur) * w);
 
     if (seg.is_ad) {
-      // 广告 → 红色
-      ctx.fillStyle = 'rgba(255, 80, 80, 0.85)';
+      ctx.fillStyle = 'rgba(255, 70, 70, 0.9)';
     } else {
-      // 信息密度 → 绿(高) → 灰(低)
       const d = seg.density || 5;
-      const r = Math.round(80 - d * 6);        // 密度高 → 绿色多
-      const g = Math.round(40 + d * 18);
+      // 绿(干货) → 黄(普通) → 灰(废话)
+      const r = Math.round(80 - d * 5);
+      const g = Math.round(50 + d * 17);
       const b = 40;
       ctx.fillStyle = `rgb(${r},${g},${b})`;
     }
     ctx.fillRect(x, 0, segW, h);
   }
 
-  // 边框圆角
-  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.roundRect(0, 0, w, h, 6);
-  ctx.stroke();
+  // 播放进度指示线
+  if (STATE.video && STATE.video.duration) {
+    const px = (STATE.video.currentTime / STATE.video.duration) * w;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(px - 1, 0, 2, h);
+  }
 
   // 图例
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, 0, 44, h);
   ctx.fillStyle = '#fff';
   ctx.font = '8px system-ui';
-  ctx.fillText('高密度', 4, 9);
+  ctx.fillText('干货', 3, 8);
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(w - 26, 0, 26, h);
   ctx.fillStyle = '#ff5050';
-  ctx.fillText('广告', w - 30, 9);
+  ctx.fillText('广告', w - 23, 8);
 
-  // 交互: 点击热力图跳转
-  canvas.addEventListener('click', (e) => {
+  // 点击跳转
+  canvas.onclick = (e) => {
     if (!STATE.video) return;
-    const ratio = e.offsetX / w;
-    STATE.video.currentTime = ratio * dur;
-  });
+    STATE.video.currentTime = (e.offsetX / w) * dur;
+  };
 
-  // 悬停提示
-  if (STATE.tooltip) {
-    canvas.title = '';
-    canvas.addEventListener('mousemove', (e) => {
-      const ratio = e.offsetX / w;
-      const time = ratio * dur;
-      const seg = segs.find(s => time >= s.start && time < s.end);
-      canvas.title = seg
-        ? `${fmtTime(seg.start)}-${fmtTime(seg.end)} | 密度:${seg.density} | ${seg.summary || ''}${seg.is_ad ? ' ⚠广告' : ''}`
-        : fmtTime(time);
-    });
+  // 播放进度实时更新
+  if (!STATE._progressUpdater) {
+    STATE._progressUpdater = setInterval(() => {
+      if (!STATE.video || !STATE.canvas) return;
+      const ctx2 = STATE.canvas.getContext('2d');
+      const px2 = (STATE.video.currentTime / STATE.video.duration) * w;
+      // 重绘进度线
+      ctx2.clearRect(0, 0, w, h);
+      // 重绘所有段
+      for (const seg of segs) {
+        const x = (seg.start / dur) * w;
+        const segW = Math.max(1.5, ((seg.end - seg.start) / dur) * w);
+        if (seg.is_ad) ctx2.fillStyle = 'rgba(255, 70, 70, 0.9)';
+        else {
+          const d = seg.density || 5;
+          ctx2.fillStyle = `rgb(${Math.round(80-d*5)},${Math.round(50+d*17)},40)`;
+        }
+        ctx2.fillRect(x, 0, segW, h);
+      }
+      // 进度线
+      ctx2.fillStyle = '#fff';
+      ctx2.fillRect(px2 - 1, 0, 2, h);
+      // 图例
+      ctx2.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx2.fillRect(0, 0, 44, h);
+      ctx2.fillStyle = '#fff';
+      ctx2.font = '8px system-ui';
+      ctx2.fillText('干货', 3, 8);
+      ctx2.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx2.fillRect(w - 26, 0, 26, h);
+      ctx2.fillStyle = '#ff5050';
+      ctx2.fillText('广告', w - 23, 8);
+    }, 500);
   }
+
+  // 监听播放器尺寸变化 (全屏/窗口切换)
+  if (!STATE._resizeObserver) {
+    STATE._resizeObserver = new ResizeObserver(() => {
+      if (STATE.heatmap && STATE.analysis) renderHeatmap();
+    });
+    STATE._resizeObserver.observe(player);
+  }
+
+  // 监听全屏变化
+  if (!STATE._fullscreenHandler) {
+    STATE._fullscreenHandler = () => {
+      setTimeout(() => { if (STATE.heatmap && STATE.analysis) renderHeatmap(); }, 300);
+    };
+    document.addEventListener('fullscreenchange', STATE._fullscreenHandler);
+  }
+
+  console.log('[密度分析器] 热力图已渲染');
 }
 
 // ============================================================
@@ -357,7 +407,9 @@ function observeUrlChange() {
       STATE.analysis = null;
       STATE.skippedAds.clear();
       if (STATE.canvas) { STATE.canvas.remove(); STATE.canvas = null; }
+      if (STATE._progressUpdater) { clearInterval(STATE._progressUpdater); STATE._progressUpdater = null; }
       waitForPlayer();
+      autoAnalyze();
     }
   });
   STATE.observer.observe(document.body, { childList: true, subtree: true });
