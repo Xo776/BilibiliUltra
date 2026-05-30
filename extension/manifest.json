@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "B站内容密度分析器",
+  "version": "0.1.0",
+  "description": "信息密度热力图 + 广告自动跳过 + 内容质量标记",
+  "icons": {
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "B站内容分析"
+  },
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://*.bilibili.com/*",
+    "https://api.bilibili.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://*.bilibili.com/video/*"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "matches": ["https://*.bilibili.com/*"],
+      "resources": ["analysis.json"]
+    }
+  ]
+}
